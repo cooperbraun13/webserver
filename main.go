@@ -75,7 +75,12 @@ func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 }
 
 func writeError(conn net.Conn, status int, message string) {
-
+	body := fmt.Sprintf("<html><body><h1>%d %s</h1></body></html>", status, message)
+	fmt.Fprintf(conn, "HTTP/1.0 %d %s\r\n", status, httpStatusText(status))
+	fmt.Fprintf(conn, "Content-Type: text/html\r\n")
+	fmt.Fprintf(conn, "Content-Length: %d\r\n", len(body))
+	fmt.Fprintf(conn, "\r\n")
+	fmt.Fprintf(conn, body)
 }
 
 func httpStatusText(code int) string {
@@ -96,11 +101,44 @@ func httpStatusText(code int) string {
 }
 
 func handleRequest(req *Request) {
+	defer req.Conn.Close()
+
+	f, err := os.Open(req.FullPath)
+	if err != nil {
+		log.Printf("open error for %s: %v", req.FullPath, err)
+		writeError(req.Conn, 404, "Not Found")
+		return
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		writeError(req.Conn, 404, "Not Found")
+		return
+	}
+
+	ct := mime.TypeByExtension(filepath.Ext(req.FullPath))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+
+	// headers
+	fmt.Fprintf(req.Conn, "HTTP/1.0 200 OK \r\n")
+	fmt.Fprintf(req.Conn, "Content-Type: %s\r\n", ct)
+	fmt.Fprintf(req.Conn, "Content-Length: %d\r\n", info.Size())
+	fmt.Fprintf(req.Conn, "\r\n")
+
+	// body
+	if _, err := io.Copy(req.Conn, f); err != nil {
+		log.Printf("error sending file %s: %v", req.FullPath, err)
+	}
 
 }
 
 func worker(id int, queue <-chan *Request) {
-
+	for req := range queue {
+		handleRequest(req)
+	}
 }
 
 func listenAndServe(cfg Config) error {
