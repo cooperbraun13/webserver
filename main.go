@@ -142,9 +142,57 @@ func worker(id int, queue <-chan *Request) {
 }
 
 func listenAndServe(cfg Config) error {
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen error: %w", err)
+	}
+	defer ln.Close()
 
+	log.Printf("listening on %s (threads=%d, buffers=%d, sched=%s, basedir=%s)", addr, cfg.Threads, cfg.Buffers, cfg.SchedAlg, cfg.BaseDir)
+
+	// FCFS bounded queue
+	queue := make(chan *Request, cfg.Buffers)
+
+	// start worker goroutines
+	for i := 0; i < cfg.Threads; i++ {
+		go worker(i, queue)
+	}
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Printf("accept error: %v", err)
+			continue
+		}
+
+		go func(c net.Conn) {
+			req, err := parseRequest(c, cfg.BaseDir)
+			if err != nil {
+				log.Printf("bad request: %v", err)
+				writeError(c, 400, "Bad Request")
+				c.Close()
+				return
+			}
+
+			// blocks when buffer is full = bounded buffer
+			queue <- req
+		}(conn)
+	}
 }
 
 func main() {
+	var cfg Config
+	flag.StringVar(&cfg.BaseDir, "d", "./www", "base directory")
+	flag.IntVar(&cfg.Port, "p", 10000, "port")
+	flag.IntVar(&cfg.Threads, "t", 1, "worker threads")
+	flag.IntVar(&cfg.Buffers, "b", 1, "buffer size")
+	flag.StringVar(&cfg.SchedAlg, "s", "FCFS", "scheduling algorithm (only FCFS for now)")
+	flag.Parse()
 
+	cfg.SchedAlg = strings.ToUpper(cfg.SchedAlg)
+
+	if err := listenAndServe(cfg); err != nil {
+		log.Fatal(err)
+	}
 }
