@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -25,6 +26,68 @@ type Request struct {
 	Conn     net.Conn
 	URI      string
 	FullPath string
+	Size     int64 // used for SJF (or SFF, shortest file first in my case) scheduling
+}
+
+type Scheduler struct {
+	mu 		 sync.Mutex
+	notEmpty *sync.Cond
+	notFull  *sync.Cond
+	buf      []*Request
+	capacity int
+	schedAlg string // "FIFO" or "SFF"
+}
+
+// ---------------- scheduler ----------------
+
+func NewSchedular(capacity int, schedAlg string) *Scheduler {
+	s := &Scheduler {
+		buf: make([]*Request, 0, capacity),
+		capacity: capacity,
+		schedAlg: schedAlg,
+	}
+	s.notEmpty = sync.NewCond(&s.mu)
+	s.notFull = sync.NewCond(&s.mu)
+	return s
+}
+
+func (s *Scheduler) Enqueue(req *Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for len(s.buf) >= s.capacity {
+		s.notFull.Wait()
+	}
+	s.buf = append(s.buf, req)
+	s.notEmpty.Signal()
+}
+
+func (s *Scheduler) Dequeue() *Request {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for len(s.buf) == 0 {
+		s.notEmpty.Wait()
+	}
+
+	var idx int
+	if s.schedAlg == "SFF" {
+		idx = 0
+		minSize := s.buf[0].Size
+		for i:= 1; i < len(s.buf); i++ {
+			if s.buf[i].Size < minSize {
+				minSize = s.buf[i].Size
+				idx = i
+			}
+		}
+	} else {
+		idx = 0 // FIFO
+	}
+
+	req := s.buf[idx]
+	s.buf = append(s.buf[:idx], s.buf[idx+1:]...)
+	s.notFull.Signal()
+	return req
 }
 
 func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
@@ -41,7 +104,7 @@ func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 		return nil, fmt.Errorf("malformed request line: %q", line)
 	}
 
-	method, uri := parts[0], parts[1]
+	method, rawURI := parts[0], parts[1]
 	if method != "GET" {
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
@@ -57,12 +120,20 @@ func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 		}
 	}
 
-	if strings.Contains(uri, "..") {
-		return nil, fmt.Errorf("path traversal attempt")
-	}
+	uri := rawURI
 
 	if uri == "/" {
 		uri = "/index.html"
+	}
+
+	// strip leading "/" so filepath.Join doesnt treat it as absolute
+	uriPath := strings.TrimPrefix(uri, "/")
+
+	// clean the path
+	clean := filepath.Clean(uriPath)
+
+	if strings.Contains(clean, "..") {
+		return nil, fmt.Errorf("path traversal attempt")
 	}
 
 	full := filepath.Join(baseDir, filepath.Clean(uri))
@@ -80,7 +151,7 @@ func writeError(conn net.Conn, status int, message string) {
 	fmt.Fprintf(conn, "Content-Type: text/html\r\n")
 	fmt.Fprintf(conn, "Content-Length: %d\r\n", len(body))
 	fmt.Fprintf(conn, "\r\n")
-	fmt.Fprintf(conn, body)
+	fmt.Fprintf(conn, "%s", body)
 }
 
 func httpStatusText(code int) string {
