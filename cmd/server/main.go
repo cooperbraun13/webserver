@@ -35,12 +35,12 @@ type Scheduler struct {
 	notFull  *sync.Cond
 	buf      []*Request
 	capacity int
-	schedAlg string // "FIFO" or "SFF"
+	schedAlg string // "FCFS" or "SFF"
 }
 
 // ---------------- scheduler ----------------
 
-func NewSchedular(capacity int, schedAlg string) *Scheduler {
+func NewScheduler(capacity int, schedAlg string) *Scheduler {
 	s := &Scheduler {
 		buf: make([]*Request, 0, capacity),
 		capacity: capacity,
@@ -81,7 +81,7 @@ func (s *Scheduler) Dequeue() *Request {
 			}
 		}
 	} else {
-		idx = 0 // FIFO
+		idx = 0 // FCFS
 	}
 
 	req := s.buf[idx]
@@ -89,6 +89,8 @@ func (s *Scheduler) Dequeue() *Request {
 	s.notFull.Signal()
 	return req
 }
+
+// ---------------- HTTP parsing / responses ----------------
 
 func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 	reader := bufio.NewReader(conn)
@@ -136,7 +138,7 @@ func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 		return nil, fmt.Errorf("path traversal attempt")
 	}
 
-	full := filepath.Join(baseDir, filepath.Clean(uri))
+	full := filepath.Join(baseDir, clean)
 
 	return &Request{
 		Conn:     conn,
@@ -167,7 +169,7 @@ func httpStatusText(code int) string {
 	case 500:
 		return "Internal Server Error"
 	default:
-		return "Unkown"
+		return "Unknown"
 	}
 }
 
@@ -182,10 +184,16 @@ func handleRequest(req *Request) {
 	}
 	defer f.Close()
 
-	info, err := f.Stat()
-	if err != nil || info.IsDir() {
-		writeError(req.Conn, 404, "Not Found")
-		return
+	var size int64
+	if req.Size > 0 {
+		size = req.Size
+	} else {
+		info, err := f.Stat()
+		if err != nil || info.IsDir() {
+			writeError(req.Conn, 404, "Not Found")
+			return
+		}
+		size = info.Size()
 	}
 
 	ct := mime.TypeByExtension(filepath.Ext(req.FullPath))
@@ -194,9 +202,9 @@ func handleRequest(req *Request) {
 	}
 
 	// headers
-	fmt.Fprintf(req.Conn, "HTTP/1.0 200 OK \r\n")
+	fmt.Fprintf(req.Conn, "HTTP/1.0 200 OK\r\n")
 	fmt.Fprintf(req.Conn, "Content-Type: %s\r\n", ct)
-	fmt.Fprintf(req.Conn, "Content-Length: %d\r\n", info.Size())
+	fmt.Fprintf(req.Conn, "Content-Length: %d\r\n", size)
 	fmt.Fprintf(req.Conn, "\r\n")
 
 	// body
@@ -206,8 +214,11 @@ func handleRequest(req *Request) {
 
 }
 
-func worker(id int, queue <-chan *Request) {
-	for req := range queue {
+// ---------------- workers & server ----------------
+
+func worker(id int, sched *Scheduler) {
+	for {
+		req := sched.Dequeue()
 		handleRequest(req)
 	}
 }
@@ -222,12 +233,11 @@ func listenAndServe(cfg Config) error {
 
 	log.Printf("listening on %s (threads=%d, buffers=%d, sched=%s, basedir=%s)", addr, cfg.Threads, cfg.Buffers, cfg.SchedAlg, cfg.BaseDir)
 
-	// FCFS bounded queue
-	queue := make(chan *Request, cfg.Buffers)
+	sched := NewScheduler(cfg.Buffers, cfg.SchedAlg)
 
 	// start worker goroutines
 	for i := 0; i < cfg.Threads; i++ {
-		go worker(i, queue)
+		go worker(i, sched)
 	}
 
 	for {
@@ -247,10 +257,21 @@ func listenAndServe(cfg Config) error {
 			}
 
 			// blocks when buffer is full = bounded buffer
-			queue <- req
+			info, err := os.Stat(req.FullPath)
+			if err != nil || info.IsDir() {
+				log.Printf("stat/open error for %s: %v", req.FullPath, err)
+				writeError(c, 404, "Not Found")
+				c.Close()
+				return
+			}
+			req.Size = info.Size()
+
+			sched.Enqueue(req)
 		}(conn)
 	}
 }
+
+// ---------------- main ----------------
 
 func main() {
 	var cfg Config
@@ -258,10 +279,16 @@ func main() {
 	flag.IntVar(&cfg.Port, "p", 10000, "port")
 	flag.IntVar(&cfg.Threads, "t", 1, "worker threads")
 	flag.IntVar(&cfg.Buffers, "b", 1, "buffer size")
-	flag.StringVar(&cfg.SchedAlg, "s", "FCFS", "scheduling algorithm (only FCFS for now)")
+	flag.StringVar(&cfg.SchedAlg, "s", "FCFS", "scheduling algorithm (FCFS or SFF)")
 	flag.Parse()
 
 	cfg.SchedAlg = strings.ToUpper(cfg.SchedAlg)
+	if cfg.SchedAlg != "FCFS" && cfg.SchedAlg != "SFF" {
+		log.Fatalf("unsupported schedule algorithm %q (must be FCFS or SFF)", cfg.SchedAlg)
+	}
+	if cfg.Threads <= 0 || cfg.Buffers <= 0 {
+		log.Fatalf("threads and buffers must be positive")
+	}
 
 	if err := listenAndServe(cfg); err != nil {
 		log.Fatal(err)
