@@ -42,7 +42,7 @@ func sendRequest(path string, wg *sync.WaitGroup, results *Results) {
 
 	// store results with mutex protection
 	results.mu.Lock()
-	if duration < 50 * time.Millisecond {
+	if path == "/small.html" {
 		results.smallTimes = append(results.smallTimes, duration)
 	} else {
 		results.bigTimes = append(results.bigTimes, duration)
@@ -66,7 +66,7 @@ func main() {
 	}
 
 	// small delay to ensure big files enter queue first
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// now send small file requests
 	for i := 0; i < 10; i++ {

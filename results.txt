@@ -1,6 +1,45 @@
------ FCFS -----
+====== FCFS ======
 
+sending burst of requests...
+/big.html completed in 63.285593ms
+/big.html completed in 64.2418ms
+/small.html completed in 72.600031ms
+/small.html completed in 72.732066ms
+/small.html completed in 72.910155ms
+/small.html completed in 73.135421ms
+/small.html completed in 73.151045ms
+/small.html completed in 73.6268ms
+/small.html completed in 73.720338ms
+/small.html completed in 74.803065ms
+/small.html completed in 74.967266ms
+/small.html completed in 75.003926ms
+/big.html completed in 128.228005ms
+/big.html completed in 128.359733ms
+/big.html completed in 185.047459ms
 
+------------ Results ------------
+small files: avg=73.665011ms, count=10
+big files: avg=113.832518ms, count=5
 
------ SFF -----
+====== SFF ======
 
+sending burst of requests...
+/big.html completed in 62.600617ms
+/small.html completed in 11.256008ms
+/small.html completed in 11.722625ms
+/small.html completed in 11.478489ms
+/small.html completed in 11.425576ms
+/small.html completed in 11.711798ms
+/small.html completed in 11.73141ms
+/small.html completed in 11.73713ms
+/small.html completed in 11.67768ms
+/small.html completed in 11.567155ms
+/small.html completed in 11.555918ms
+/big.html completed in 63.782992ms
+/big.html completed in 124.357687ms
+/big.html completed in 124.598555ms
+/big.html completed in 184.808679ms
+
+------------ Results ------------
+small files: avg=11.586378ms, count=10
+big files: avg=112.029706ms, count=5
