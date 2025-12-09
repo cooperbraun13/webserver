@@ -1,0 +1,19 @@
+----- FCFS -----
+
+terminal 1: start server with FCFS
+
+go run cmd/server/main.go -p 8000 -t 2 -b 5 -s FCFS
+
+terminal 2: run the client
+
+go run cmd/client/main.go
+
+----- SFF -----
+
+terminal 1: start server with SFF
+
+go run cmd/server/main.go -p 8000 -t 2 -b 5 -s SFF
+
+terminal 2: run the client
+
+go run cmd/client/main.go

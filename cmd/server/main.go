@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -195,6 +196,9 @@ func handleRequest(req *Request) {
 		}
 		size = info.Size()
 	}
+
+	// simulates processing delay
+	time.Sleep(time.Duration(size/10000) * time.Millisecond)
 
 	ct := mime.TypeByExtension(filepath.Ext(req.FullPath))
 	if ct == "" {
