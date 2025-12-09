@@ -45,7 +45,8 @@ func sendRequest(path string, wg *sync.WaitGroup, results *Results) {
 
 	// stop timer: calculate total time
 	duration := time.Since(start)
-	fmt.Printf("%s completed in %v\n", path, duration)
+	now := time.Now()
+	fmt.Printf("[%s] %s completed in %v\n", now.Format("15:04:05.000"), path, duration)
 
 	// store results: use mutex to safely append to shared slice
 	results.mu.Lock()
