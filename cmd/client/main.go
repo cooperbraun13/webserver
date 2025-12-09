@@ -1,46 +1,53 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"log"
-	"net"
-	"sync"
-	"time"
+	"bufio" // buffered reading of HTTP responses
+	"fmt"   // formatted output
+	"log"   // error logging
+	"net"   // network connections (TCP)
+	"sync"  // WaitGroup and Mutex for synchronization
+	"time"  // timing measurements and delays
 )
 
 type Results struct {
-	mu 		   sync.Mutex
-	smallTimes []time.Duration
-	bigTimes   []time.Duration
+	mu 		   sync.Mutex      // protects the slices from concurrent access
+	smallTimes []time.Duration // response times for small.html requests
+	bigTimes   []time.Duration // response times for big.html requests
 }
 
 func sendRequest(path string, wg *sync.WaitGroup, results *Results) {
+	// tell WaitGroup were done when the function exits
 	defer wg.Done()
 	
+	// start timer: measure total response time
 	start := time.Now()
+
+	// connect: open tcp connection to server
 	conn, err := net.Dial("tcp", "localhost:8000")
 	if err != nil {
 		log.Println("dial error:", err)
 		return
 	}
+	// close connection when done
 	defer conn.Close()
 
+	// send HTTP request: simple GET request
 	fmt.Fprintf(conn, "GET %s HTTP/1.0\r\nHost: localhost\r\n\r\n", path)
 
-	// read full response
+	// read response: read entire response (header + body)
 	reader := bufio.NewReader(conn)
 	for {
 		_, err := reader.ReadString('\n')
 		if err != nil {
-			break
+			break // EOF or error = response complete
 		}
 	}
 
+	// stop timer: calculate total time
 	duration := time.Since(start)
 	fmt.Printf("%s completed in %v\n", path, duration)
 
-	// store results with mutex protection
+	// store results: use mutex to safely append to shared slice
 	results.mu.Lock()
 	if path == "/small.html" {
 		results.smallTimes = append(results.smallTimes, duration)
@@ -51,6 +58,7 @@ func sendRequest(path string, wg *sync.WaitGroup, results *Results) {
 }
 
 func main() {
+	// setup: create WaitGroup and Results
 	var wg sync.WaitGroup
 	results := &Results{
 		smallTimes: make([]time.Duration, 0),
@@ -59,21 +67,23 @@ func main() {
 
 	fmt.Println("sending burst of requests...")
 
-	// first, send several big file requests
+	// phase 1: launch 5 big file requests
 	for i := 0; i < 5; i++ {
+		// tell WaitGroup to expect on more goroutine
 		wg.Add(1)
 		go sendRequest("/big.html", &wg, results)
 	}
 
-	// small delay to ensure big files enter queue first
+	// give big files time to reach the server first
 	time.Sleep(50 * time.Millisecond)
 
-	// now send small file requests
+	// phase 2: launch 10 small file requests
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go sendRequest("/small.html", &wg, results)
 	}
 
+	// wait: block until all goroutines finish
 	wg.Wait()
 
 	// calculate statistics
