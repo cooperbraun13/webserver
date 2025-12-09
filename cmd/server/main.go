@@ -278,6 +278,7 @@ func handleRequest(req *Request) {
 func worker(id int, sched *Scheduler) {
 	for {
 		req := sched.Dequeue() // block until work available
+		log.Printf("worker %d handling %s", id, req.URI)
 		handleRequest(req)     // process the request
 	}
 }
