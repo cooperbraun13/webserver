@@ -24,7 +24,7 @@ type Config struct {
 	SchedAlg string // scheduling algorithm: FCFS or SFF
 }
 
-// Each Request represents one HTTP GET request waiting to be processed by a worker
+// Request represents one HTTP GET request waiting to be processed by a worker
 type Request struct {
 	Conn     net.Conn // the TCP connection to the clients browser
 	URI      string   // the requested path (e.g., "/big.html")
@@ -32,8 +32,7 @@ type Request struct {
 	Size     int64    // file size in bytes (used for SFF scheduling)
 }
 
-// Scheduler manages a bounded buffer for producer-consumer request handling with 
-// mutex-protected access and condition variables for efficient thread synchronization
+// Scheduler manages a bounded buffer for producer-consumer request handling
 type Scheduler struct {
 	mu 		 sync.Mutex // mutex protects the buffer from race conditions
 	notEmpty *sync.Cond // condition variable: signals workers when requests arrive
@@ -45,6 +44,7 @@ type Scheduler struct {
 
 // ---------------- scheduler ----------------
 
+// NewScheduler creates and initializes a new Scheduler with the given capacity and algorithm
 func NewScheduler(capacity int, schedAlg string) *Scheduler {
 	s := &Scheduler {
 		buf: make([]*Request, 0, capacity), // start with empty slice, max capacity
@@ -57,7 +57,7 @@ func NewScheduler(capacity int, schedAlg string) *Scheduler {
 	return s
 }
 
-// producer: master thread adds requests
+// Enqueue adds a request to the buffer, blocking if full (producer)
 func (s *Scheduler) Enqueue(req *Request) {
 	// lock: get exclusive access to buffer
 	s.mu.Lock()
@@ -77,7 +77,7 @@ func (s *Scheduler) Enqueue(req *Request) {
 	s.notEmpty.Signal()
 }
 
-// consumer: workers take requests
+// Dequeue removes and returns a request based on scheduling algorithm, blocking if empty (consumer)
 func (s *Scheduler) Dequeue() *Request {
 	// lock: get exclusive access
 	s.mu.Lock()
@@ -120,6 +120,7 @@ func (s *Scheduler) Dequeue() *Request {
 
 // ---------------- HTTP parsing / responses ----------------
 
+// parseRequest parses an HTTP request and returns a Request struct with file path info
 func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 	reader := bufio.NewReader(conn)
 
@@ -186,6 +187,7 @@ func parseRequest(conn net.Conn, baseDir string) (*Request, error) {
 	}, nil
 }
 
+// writeError sends an HTTP error response with the given status code and message
 func writeError(conn net.Conn, status int, message string) {
 	// create simple HTML error page
 	body := fmt.Sprintf("<html><body><h1>%d %s</h1></body></html>", status, message)
@@ -202,6 +204,7 @@ func writeError(conn net.Conn, status int, message string) {
 	fmt.Fprintf(conn, "%s", body)
 }
 
+// httpStatusText returns the standard text description for an HTTP status code
 func httpStatusText(code int) string {
 	switch code {
 	case 200:
@@ -219,6 +222,7 @@ func httpStatusText(code int) string {
 	}
 }
 
+// handleRequest processes a request by opening the file, simulating delay, and sending response
 func handleRequest(req *Request) {
 	// always close connection when done
 	defer req.Conn.Close()
@@ -248,7 +252,7 @@ func handleRequest(req *Request) {
 	}
 
 	// artificial delay: simulates disk I/O / processing time
-	// makes scheduling diffferences observable
+	// makes scheduling differences observable
 	// small.html (205 bytes): 205 / 10000 = 0.02ms
 	// big.html (594129 bytes): 594129 / 10000 = 59.41 ms
 	time.Sleep(time.Duration(size/10000) * time.Millisecond)
@@ -275,6 +279,7 @@ func handleRequest(req *Request) {
 
 // ---------------- workers & server ----------------
 
+// worker runs in a loop, dequeuing and handling requests until program exits
 func worker(id int, sched *Scheduler) {
 	for {
 		req := sched.Dequeue() // block until work available
@@ -283,6 +288,7 @@ func worker(id int, sched *Scheduler) {
 	}
 }
 
+// listenAndServe creates the server, spawns workers, and accepts incoming connections
 func listenAndServe(cfg Config) error {
 	// create listening socket
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -342,6 +348,7 @@ func listenAndServe(cfg Config) error {
 
 // ---------------- main ----------------
 
+// main parses flags, validates configuration, and starts the server
 func main() {
 	// define command line flags
 	var cfg Config

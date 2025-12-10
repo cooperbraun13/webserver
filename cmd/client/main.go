@@ -9,12 +9,14 @@ import (
 	"time"  // timing measurements and delays
 )
 
+// Results stores response times for small and big files with thread-safe access
 type Results struct {
 	mu 		   sync.Mutex      // protects the slices from concurrent access
 	smallTimes []time.Duration // response times for small.html requests
 	bigTimes   []time.Duration // response times for big.html requests
 }
 
+// sendRequest makes an HTTP GET request, measures response time, and stores the result
 func sendRequest(path string, wg *sync.WaitGroup, results *Results) {
 	// tell WaitGroup were done when the function exits
 	defer wg.Done()
@@ -58,6 +60,7 @@ func sendRequest(path string, wg *sync.WaitGroup, results *Results) {
 	results.mu.Unlock()
 }
 
+// main launches concurrent requests and calculates average response times
 func main() {
 	// setup: create WaitGroup and Results
 	var wg sync.WaitGroup
@@ -103,6 +106,7 @@ func main() {
 	}
 }
 
+// average calculates the mean of a slice of durations
 func average(times []time.Duration) time.Duration {
 	var sum time.Duration
 	for _, t := range times {
